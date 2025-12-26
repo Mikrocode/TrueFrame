@@ -2,6 +2,7 @@ import crypto from "crypto";
 import sharp from "sharp";
 import { AnalyzerRequest, AnalyzerResponse, AnalyzerSignal } from "@/lib/types";
 import { clamp01, hashConfidenceKey } from "@/lib/utils";
+import { hashConfidenceKey } from "@/lib/utils";
 
 const MAX_UPLOAD_SIZE = 10 * 1024 * 1024; // 10MB
 const RATE_LIMIT_WINDOW_MS = 60 * 1000;
@@ -47,12 +48,11 @@ export function computeConfidence(key: string) {
 }
 
 export function dataUrlToBuffer(dataUrl: string) {
-  const match = /^data:([^;]+);base64,(.+)$/.exec(dataUrl);
-  const base64Data = match?.[2];
-  if (!base64Data) {
+  const match = dataUrl.match(/^data:(?<mime>.+);base64,(?<data>.+)$/);
+  if (!match?.groups?.data) {
     throw new Error("Invalid data URL");
   }
-  return Buffer.from(base64Data, "base64");
+  return Buffer.from(match.groups.data, "base64");
 }
 
 type ImageSignals = {
@@ -102,6 +102,15 @@ export async function normalizeImageBuffer(buffer: Buffer) {
 
   const dataUrl = `data:image/jpeg;base64,${data.toString("base64")}`;
   return { buffer: data, dataUrl, signals };
+export async function normalizeImageBuffer(buffer: Buffer) {
+  const { data } = await sharp(buffer)
+    .rotate()
+    .resize({ width: 512, height: 512, fit: "inside" })
+    .jpeg({ quality: 85 })
+    .toBuffer({ resolveWithObject: true });
+
+  const dataUrl = `data:image/jpeg;base64,${data.toString("base64")}`;
+  return { buffer: data, dataUrl };
 }
 
 export async function fetchImageFromUrl(url: string) {
@@ -136,6 +145,9 @@ function scoreFromSignals(signals: ImageSignals) {
 }
 
 export async function analyzeRequest(payload: AnalyzerRequest): Promise<AnalyzerResponse> {
+export async function analyzeRequest(
+  payload: AnalyzerRequest
+): Promise<AnalyzerResponse> {
   const sourceKey = payload.dataUrl ?? payload.url;
   if (!sourceKey) {
     throw new Error("Either dataUrl or url is required.");
@@ -149,6 +161,12 @@ export async function analyzeRequest(payload: AnalyzerRequest): Promise<Analyzer
     { type: "source", value: payload.dataUrl ? "upload" : "url" },
     { type: "c2pa", value: "unknown" },
     { type: "base_score", value: Number(baseConfidence.toFixed(3)) }
+  const confidence = computeConfidence(hashedKey);
+  const label = mapConfidenceToLabel(confidence);
+  const signals: AnalyzerSignal[] = [
+    { type: "source", value: payload.dataUrl ? "upload" : "url" },
+    { type: "c2pa", value: "unknown" },
+    { type: "model_score", value: Number(confidence.toFixed(3)) }
   ];
 
   let imageBuffer: Buffer | undefined;
@@ -177,6 +195,8 @@ export async function analyzeRequest(payload: AnalyzerRequest): Promise<Analyzer
   signals.push({ type: "model_score", value: Number(confidence.toFixed(3)) });
 
   const label = mapConfidenceToLabel(confidence);
+
+  }
 
   return {
     label,
