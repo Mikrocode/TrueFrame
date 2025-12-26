@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import sharp from "sharp";
 import { AnalyzerRequest, AnalyzerResponse, AnalyzerSignal } from "@/lib/types";
+import { clamp01, hashConfidenceKey } from "@/lib/utils";
 import { hashConfidenceKey } from "@/lib/utils";
 
 const MAX_UPLOAD_SIZE = 10 * 1024 * 1024; // 10MB
@@ -54,6 +55,53 @@ export function dataUrlToBuffer(dataUrl: string) {
   return Buffer.from(match.groups.data, "base64");
 }
 
+type ImageSignals = {
+  entropy: number;
+  edgeDensity: number;
+  noise: number;
+  exifPresent: boolean;
+};
+
+const laplacianKernel = {
+  width: 3,
+  height: 3,
+  kernel: [-1, -1, -1, -1, 8, -1, -1, -1, -1]
+};
+
+export async function normalizeImageBuffer(buffer: Buffer) {
+  const metadata = await sharp(buffer).metadata();
+  const pipeline = sharp(buffer).rotate().resize({ width: 512, height: 512, fit: "inside" });
+  const { data } = await pipeline
+    .jpeg({ quality: 88 })
+    .toBuffer({ resolveWithObject: true });
+
+  const normalizedForStats = await sharp(data)
+    .resize(256, 256, { fit: "inside", withoutEnlargement: true })
+    .toBuffer();
+
+  const stats = await sharp(normalizedForStats).stats();
+  const edgeResult = await sharp(normalizedForStats)
+    .grayscale()
+    .convolve(laplacianKernel)
+    .raw()
+    .toBuffer({ resolveWithObject: true });
+
+  const edgeEnergy =
+    edgeResult.data.reduce((sum, value) => sum + Math.abs(value), 0) /
+    Math.max(1, edgeResult.data.length * 255);
+
+  const entropy = stats.entropy ?? 0;
+  const stdev = stats.channels?.[0]?.stdev ?? 0;
+
+  const signals: ImageSignals = {
+    entropy,
+    edgeDensity: edgeEnergy,
+    noise: stdev / 128,
+    exifPresent: Boolean(metadata.exif && metadata.exif.length > 0)
+  };
+
+  const dataUrl = `data:image/jpeg;base64,${data.toString("base64")}`;
+  return { buffer: data, dataUrl, signals };
 export async function normalizeImageBuffer(buffer: Buffer) {
   const { data } = await sharp(buffer)
     .rotate()
@@ -86,6 +134,17 @@ export async function fetchImageFromUrl(url: string) {
   return buffer;
 }
 
+function scoreFromSignals(signals: ImageSignals) {
+  const entropyScore = clamp01(signals.entropy / 7);
+  const edgeScore = clamp01(signals.edgeDensity / 0.6);
+  const noiseScore = clamp01(signals.noise / 0.35);
+  const exifBonus = signals.exifPresent ? 0.05 : -0.03;
+
+  const combined = entropyScore * 0.35 + edgeScore * 0.35 + noiseScore * 0.25 + exifBonus;
+  return clamp01(combined);
+}
+
+export async function analyzeRequest(payload: AnalyzerRequest): Promise<AnalyzerResponse> {
 export async function analyzeRequest(
   payload: AnalyzerRequest
 ): Promise<AnalyzerResponse> {
@@ -95,6 +154,13 @@ export async function analyzeRequest(
   }
 
   const hashedKey = hashConfidenceKey(sourceKey);
+  const baseConfidence = computeConfidence(hashedKey);
+  let signalsFromImage: ImageSignals | null = null;
+
+  const signals: AnalyzerSignal[] = [
+    { type: "source", value: payload.dataUrl ? "upload" : "url" },
+    { type: "c2pa", value: "unknown" },
+    { type: "base_score", value: Number(baseConfidence.toFixed(3)) }
   const confidence = computeConfidence(hashedKey);
   const label = mapConfidenceToLabel(confidence);
   const signals: AnalyzerSignal[] = [
@@ -115,6 +181,21 @@ export async function analyzeRequest(
   if (imageBuffer) {
     const normalized = await normalizeImageBuffer(imageBuffer);
     normalizedDataUrl = normalized.dataUrl;
+    signalsFromImage = normalized.signals;
+    signals.push(
+      { type: "entropy", value: Number(normalized.signals.entropy.toFixed(3)) },
+      { type: "edge_density", value: Number(normalized.signals.edgeDensity.toFixed(3)) },
+      { type: "noise", value: Number(normalized.signals.noise.toFixed(3)) },
+      { type: "exif_present", value: normalized.signals.exifPresent ? "yes" : "no" }
+    );
+  }
+
+  const imageScore = signalsFromImage ? scoreFromSignals(signalsFromImage) : baseConfidence;
+  const confidence = clamp01(baseConfidence * 0.35 + imageScore * 0.65);
+  signals.push({ type: "model_score", value: Number(confidence.toFixed(3)) });
+
+  const label = mapConfidenceToLabel(confidence);
+
   }
 
   return {

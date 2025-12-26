@@ -12,3 +12,8 @@ export function formatConfidence(confidence: number) {
 export function hashConfidenceKey(input: string) {
   return input.trim().toLowerCase();
 }
+
+export function clamp01(value: number) {
+  if (Number.isNaN(value) || !Number.isFinite(value)) return 0;
+  return Math.min(1, Math.max(0, value));
+}

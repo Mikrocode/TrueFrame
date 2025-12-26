@@ -59,4 +59,5 @@ Signals always include `source`, `c2pa`, and a `model_score`. The placeholder mo
 
 ## Notes
 - Images are downscaled to a max of 512px on the server via `sharp`.
+- The analyzer now blends deterministic hashing with lightweight, open-source style heuristics (entropy, Laplacian edge density, noise, EXIF presence) inspired by community image-quality projects (e.g., BRISQUE/NIQE) to produce more meaningful signals without external services.
 - The analyzer is deterministic and intended for demo purposes only.
