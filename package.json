@@ -1,0 +1,45 @@
+{
+  "name": "trueframe",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "TrueFrame demo web app and API for explainable AI image checks.",
+  "license": "MIT",
+  "packageManager": "npm@11.4.2",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@radix-ui/react-accordion": "^1.2.0",
+    "@radix-ui/react-slot": "^1.1.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.469.0",
+    "next": "^14.2.10",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "sharp": "^0.33.4",
+    "tailwind-merge": "^2.5.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^9.14.0",
+    "eslint-config-next": "^14.2.10",
+    "postcss": "^8.4.47",
+    "tailwindcss-animate": "^1.0.7",
+    "tailwindcss": "^3.4.14",
+    "typescript": "^5.6.3"
+  },
+  "overrides": {
+    "glob": "^10.4.5",
+    "rimraf": "^5.0.10",
+    "@humanwhocodes/config-array": "^0.13.1",
+    "@humanwhocodes/object-schema": "^2.1.1"
+  }
+}
