@@ -23,6 +23,36 @@ function getClientId(req: NextRequest) {
   );
 }
 
+const BODY_SIZE_LIMIT = 10 * 1024 * 1024; // 10MB
+
+async function readJsonWithLimit(req: NextRequest, limitBytes: number) {
+  const body = req.body;
+  if (!body) {
+    throw new Error("Missing request body");
+  }
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let received = 0;
+  let text = "";
+
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+
+    if (value) {
+      received += value.byteLength;
+      if (received > limitBytes) {
+        throw new RangeError("BODY_TOO_LARGE");
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+  }
+
+  text += decoder.decode();
+  return JSON.parse(text || "{}");
+}
+
 export async function POST(req: NextRequest) {
   if (isOversizedRequest(req.headers.get("content-length"))) {
     return new Response("Payload too large", {
@@ -42,8 +72,14 @@ export async function POST(req: NextRequest) {
 
   let payload: AnalyzerRequest;
   try {
-    payload = (await req.json()) as AnalyzerRequest;
-  } catch (error) {
+    payload = (await readJsonWithLimit(req, BODY_SIZE_LIMIT)) as AnalyzerRequest;
+  } catch (error: any) {
+    if (error instanceof RangeError && error.message === "BODY_TOO_LARGE") {
+      return new Response("Payload too large", {
+        status: 413,
+        headers: CORS_HEADERS
+      });
+    }
     return new Response("Invalid JSON body", { status: 400, headers: CORS_HEADERS });
   }
 
